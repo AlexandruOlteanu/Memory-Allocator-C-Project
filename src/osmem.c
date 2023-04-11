@@ -5,35 +5,54 @@
 #include <stdlib.h>
 
 #define MMAP_THRESHOLD	(128 * 1024)
+#define BYTE_GROUP_MEASURE (1 << 3)
 
 
-struct block_meta *head;
-struct block_meta *last;
+struct data_blocks {
+	block_meta *head;
+} data;
 
-struct block_meta *find_reusable_block(size_t size) {
-
-	struct block_meta *aux = head;
-	while (aux != NULL) {
-		if (aux->status == STATUS_FREE && aux->size >= size) {
-			return aux;
-		}
-		aux = aux->next;
+block_meta *get_last_block() {
+	block_meta *node = data.head;
+	while (node->next != NULL) {
+		node = node->next;
 	}
-	return NULL;
+	return node;
 }
 
-void *my_alloc(size_t size, int limit) {
+block_meta *get_first_free_data_block(size_t size) {
+
+	block_meta *node = data.head;
+	block_meta *result = NULL;
+	while (node != NULL) {
+		if (node->status == STATUS_FREE && node->size >= size) {
+			result = node;
+			break;
+		} else {
+			node = node->next;
+		}
+	}
+
+	return result;
+}
+
+
+int added_padding(int value) {
+	return (value / BYTE_GROUP_MEASURE) * BYTE_GROUP_MEASURE + (value % BYTE_GROUP_MEASURE != 0) * BYTE_GROUP_MEASURE;
+}
+
+void *allocate_memory_by_target(size_t size, int target) {
 	 if (size == 0) {
         return NULL;
-    } else if (size + sizeof(struct block_meta) + (8 - size % 8) % 8 < limit) {
+    } else if (size + sizeof(block_meta) + (8 - size % 8) % 8 < target) {
 
-		if (head == NULL) {
+		if (data.head == NULL) {
         	void *memory = sbrk(MMAP_THRESHOLD);
-			struct block_meta *node = memory;
+			block_meta *node = memory;
 			node->size = size + (8 - size % 8) % 8;
 			node->status = STATUS_ALLOC;
 			node->next = NULL;
-			head = last = node;
+			data.head = node;
 			if (memory == (void *) -1) {
             	return NULL;
 			} else {
@@ -41,13 +60,13 @@ void *my_alloc(size_t size, int limit) {
 			}
 		}
 		else {
-			struct block_meta *answer = find_reusable_block(size + (8 - size % 8) % 8);
+			block_meta *answer = get_first_free_data_block(size + (8 - size % 8) % 8);
 			if (answer != NULL) {
 				answer->status = STATUS_ALLOC;
 
-				if (answer->size - (size + (8 - size % 8) % 8) >= sizeof(struct block_meta) + 1) {
-					struct block_meta *node = (char *)answer + sizeof(struct block_meta) + (size + (8 - size % 8) % 8);
-					node->size = answer->size - (size + (8 - size % 8) % 8) - sizeof(struct block_meta);
+				if (answer->size - (size + (8 - size % 8) % 8) >= sizeof(block_meta) + 1) {
+					block_meta *node = (char *)answer + sizeof(block_meta) + (size + (8 - size % 8) % 8);
+					node->size = answer->size - (size + (8 - size % 8) % 8) - sizeof(block_meta);
 					node->status = STATUS_FREE;
 					answer->size = size + (8 - size % 8) % 8;
 					node->next = answer->next;
@@ -57,6 +76,7 @@ void *my_alloc(size_t size, int limit) {
 				return (answer + 1);
 			}
 			else {
+				block_meta *last = get_last_block();
 				if (last->status == STATUS_FREE) {
 					void *memory = sbrk((size - last->size) + (8 - (size - last->size) % 8) % 8);
 					last->size += (size - last->size) + (8 - (size - last->size) % 8) % 8;
@@ -64,11 +84,12 @@ void *my_alloc(size_t size, int limit) {
 					return (last + 1);
 				}
 				else {
-					void *memory = sbrk(size + sizeof(struct block_meta) + (8 - size % 8) % 8);
-					struct block_meta *node = memory;
+					void *memory = sbrk(size + sizeof(block_meta) + (8 - size % 8) % 8);
+					block_meta *node = memory;
 					node->size = size + (8 - size % 8) % 8;
 					node->status = STATUS_ALLOC;
 					node->next = NULL;
+					block_meta *last = get_last_block();
 					last -> next = node;
 					last = node;
 					if (memory == (void *) -1) {
@@ -83,18 +104,18 @@ void *my_alloc(size_t size, int limit) {
         
     } else {
         // Allocate memory using mmap()
-		struct block_meta *node;
-        void *memory = mmap(NULL, size + sizeof(struct block_meta) + (8 - size % 8) % 8, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+		block_meta *node;
+        void *memory = mmap(NULL, size + sizeof(block_meta) + (8 - size % 8) % 8, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 		node = memory;
 		node->size = size + (8 - size % 8) % 8;
 		node->status = STATUS_MAPPED;
 		node->next = NULL;
-		if (head == NULL) {
-			head = last = node;
+		if (data.head == NULL) {
+			data.head = node;
 		}
 		else {
+			block_meta *last = get_last_block();
 			last->next = node;
-			last = node;
 		}
         if (memory == MAP_FAILED) {
             // Memory allocation failed
@@ -108,14 +129,14 @@ void *my_alloc(size_t size, int limit) {
 }
 
 void *os_malloc(size_t size) {
-   return my_alloc(size, MMAP_THRESHOLD);
+   return allocate_memory_by_target(size, MMAP_THRESHOLD);
 }
 
 void os_free(void *ptr) {
     if (ptr != NULL) {
         // Determine the size of the allocated memory
 		
-		struct block_meta *aux = head, *prev = NULL;
+		block_meta *aux = data.head, *prev = NULL;
 
 		while (aux + 1 != ptr) {
 			prev = aux;
@@ -125,30 +146,26 @@ void os_free(void *ptr) {
 		if (aux->status == STATUS_ALLOC) {
 			aux->status = STATUS_FREE;
 			if (prev != NULL && prev->status == STATUS_FREE) {
-				prev->size += aux->size + sizeof(struct block_meta);
+				prev->size += aux->size + sizeof(block_meta);
 				prev->next = aux->next;
 				aux = prev;
 			}
 			if (aux -> next != NULL && aux->next->status == STATUS_FREE) {
-				aux->size += aux->next->size + sizeof(struct block_meta);
+				aux->size += aux->next->size + sizeof(block_meta);
 				aux->next = aux->next->next;
 			}
-			last = head;
-			while (last -> next != NULL) {
-				last = last->next;
-			} 
 
 		} else {
 			
-			if (aux == head) {
-				head = head->next;
+			if (aux == data.head) {
+				data.head = data.head->next;
 			}
 			else {
 				prev->next = aux->next;
 			}
 
 			size_t size = aux->size;
-			munmap(aux, size + sizeof(struct block_meta));
+			munmap(aux, size + sizeof(block_meta));
 		}
     }
 }
@@ -156,14 +173,14 @@ void os_free(void *ptr) {
 void *os_calloc(size_t nmemb, size_t size)
 {
 	size = nmemb * size;
-	void *ptr = my_alloc(size, getpagesize());
+	void *ptr = allocate_memory_by_target(size, getpagesize());
   	memset(ptr, 0, size);
   	return ptr;
 }
 
 void *os_realloc(void *ptr, size_t size) {
     if (ptr == NULL) {
-        return my_alloc(size, MMAP_THRESHOLD);
+        return allocate_memory_by_target(size, MMAP_THRESHOLD);
     }
 
     if (size == 0) {
@@ -188,10 +205,10 @@ void *os_realloc(void *ptr, size_t size) {
                 new_block->status = STATUS_ALLOC;
                 new_block->next = aux->next;
 
-                if (head == aux) {
-                    head = new_block;
+                if (data.head == aux) {
+                    data.head = new_block;
                 } else {
-                    struct block_meta *prev = head;
+                    block_meta *prev = data.head;
                     while (prev->next != aux) {
                         prev = prev->next;
                     }
@@ -222,7 +239,7 @@ void *os_realloc(void *ptr, size_t size) {
         return ptr;
     } else {
         // Allocate a new block and copy the data
-        void *new_ptr = my_alloc(size, MMAP_THRESHOLD);
+        void *new_ptr = allocate_memory_by_target(size, MMAP_THRESHOLD);
         if (new_ptr) {
             memcpy(new_ptr, ptr, aux->size);
             os_free(ptr);
