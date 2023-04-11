@@ -6,7 +6,7 @@
 
 #define MMAP_THRESHOLD	(128 * 1024)
 #define BYTE_GROUP_MEASURE (1 << 3)
-
+#define block_meta_size (sizeof(block_meta))
 
 struct data_blocks {
 	block_meta *head;
@@ -41,34 +41,36 @@ int added_padding(int value) {
 	return (value / BYTE_GROUP_MEASURE) * BYTE_GROUP_MEASURE + (value % BYTE_GROUP_MEASURE != 0) * BYTE_GROUP_MEASURE;
 }
 
+int get_full_data_block_size(int value) {
+	return added_padding(value + block_meta_size);
+}
+
 void *allocate_memory_by_target(size_t size, int target) {
-	 if (size == 0) {
-        return NULL;
-    } else if (size + sizeof(block_meta) + (8 - size % 8) % 8 < target) {
+	if (!size) {
+    	return NULL;
+	}
+
+    if (get_full_data_block_size(size) < target) {
 
 		if (data.head == NULL) {
         	void *memory = sbrk(MMAP_THRESHOLD);
 			block_meta *node = memory;
-			node->size = size + (8 - size % 8) % 8;
+			node->size = added_padding(size);
 			node->status = STATUS_ALLOC;
 			node->next = NULL;
 			data.head = node;
-			if (memory == (void *) -1) {
-            	return NULL;
-			} else {
-				return (void *)((char *)memory + sizeof(struct block_meta));
-			}
+			return (void *)((char *)memory + block_meta_size);
 		}
 		else {
-			block_meta *answer = get_first_free_data_block(size + (8 - size % 8) % 8);
+			block_meta *answer = get_first_free_data_block(added_padding(size));
 			if (answer != NULL) {
 				answer->status = STATUS_ALLOC;
 
-				if (answer->size - (size + (8 - size % 8) % 8) >= sizeof(block_meta) + 1) {
-					block_meta *node = (char *)answer + sizeof(block_meta) + (size + (8 - size % 8) % 8);
-					node->size = answer->size - (size + (8 - size % 8) % 8) - sizeof(block_meta);
+				if (answer->size - added_padding(size) >= block_meta_size + 1) {
+					block_meta *node = (char *)answer + get_full_data_block_size(size);
+					node->size = answer->size - get_full_data_block_size(size);
 					node->status = STATUS_FREE;
-					answer->size = size + (8 - size % 8) % 8;
+					answer->size = added_padding(size);
 					node->next = answer->next;
 					answer->next = node;
 				}
@@ -78,36 +80,30 @@ void *allocate_memory_by_target(size_t size, int target) {
 			else {
 				block_meta *last = get_last_block();
 				if (last->status == STATUS_FREE) {
-					void *memory = sbrk((size - last->size) + (8 - (size - last->size) % 8) % 8);
-					last->size += (size - last->size) + (8 - (size - last->size) % 8) % 8;
+					void *memory = sbrk(added_padding(size - last->size));
+					last->size += added_padding(size - last->size);
 					last->status = STATUS_ALLOC;
 					return (last + 1);
 				}
 				else {
-					void *memory = sbrk(size + sizeof(block_meta) + (8 - size % 8) % 8);
+					void *memory = sbrk(get_full_data_block_size(size));
 					block_meta *node = memory;
-					node->size = size + (8 - size % 8) % 8;
+					node->size = added_padding(size);
 					node->status = STATUS_ALLOC;
 					node->next = NULL;
 					block_meta *last = get_last_block();
 					last -> next = node;
 					last = node;
-					if (memory == (void *) -1) {
-						// Memory allocation failed
-						return NULL;
-					} else {
-						return (void *)((char *)memory + sizeof(struct block_meta));
-					}
+					return (void *)((char *)memory + block_meta_size);
 				}
 			}
 		}
         
     } else {
-        // Allocate memory using mmap()
 		block_meta *node;
-        void *memory = mmap(NULL, size + sizeof(block_meta) + (8 - size % 8) % 8, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        void *memory = mmap(NULL, get_full_data_block_size(size), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 		node = memory;
-		node->size = size + (8 - size % 8) % 8;
+		node->size = added_padding(size);
 		node->status = STATUS_MAPPED;
 		node->next = NULL;
 		if (data.head == NULL) {
@@ -117,14 +113,7 @@ void *allocate_memory_by_target(size_t size, int target) {
 			block_meta *last = get_last_block();
 			last->next = node;
 		}
-        if (memory == MAP_FAILED) {
-            // Memory allocation failed
-            return NULL;
-        } else {
-            // Store the size of the allocated memory at the beginning of the block
-            // *((size_t *)memory) = size;
-            return (void *)((char *)memory + sizeof(struct block_meta));
-        }
+        return (void *)((char *)memory + sizeof(struct block_meta));
     }
 }
 
@@ -134,8 +123,7 @@ void *os_malloc(size_t size) {
 
 void os_free(void *ptr) {
     if (ptr != NULL) {
-        // Determine the size of the allocated memory
-		
+
 		block_meta *aux = data.head, *prev = NULL;
 
 		while (aux + 1 != ptr) {
@@ -146,17 +134,16 @@ void os_free(void *ptr) {
 		if (aux->status == STATUS_ALLOC) {
 			aux->status = STATUS_FREE;
 			if (prev != NULL && prev->status == STATUS_FREE) {
-				prev->size += aux->size + sizeof(block_meta);
+				prev->size += aux->size + block_meta_size;
 				prev->next = aux->next;
 				aux = prev;
 			}
 			if (aux -> next != NULL && aux->next->status == STATUS_FREE) {
-				aux->size += aux->next->size + sizeof(block_meta);
+				aux->size += aux->next->size + block_meta_size;
 				aux->next = aux->next->next;
 			}
-
-		} else {
-			
+		} 
+		else {
 			if (aux == data.head) {
 				data.head = data.head->next;
 			}
@@ -165,7 +152,7 @@ void os_free(void *ptr) {
 			}
 
 			size_t size = aux->size;
-			munmap(aux, size + sizeof(block_meta));
+			munmap(aux, size + block_meta_size);
 		}
     }
 }
@@ -190,17 +177,16 @@ void *os_realloc(void *ptr, size_t size) {
 
     struct block_meta *aux = (struct block_meta *)ptr - 1;
 
-    if (size + (8 - size % 8) % 8 <= aux->size) {
-        // If the new size is smaller than the current block size, consider shrinking the block
+    if (added_padding(size) <= aux->size) {
 
 		if (aux->status == STATUS_MAPPED) {
-			if (size + (8 - size % 8) % 8 < MMAP_THRESHOLD) {
-                size_t new_size = size + (8 - size % 8) % 8;
+			if (added_padding(size) < MMAP_THRESHOLD) {
+                size_t new_size = added_padding(size);
                 void *new_memory = sbrk(MMAP_THRESHOLD);
                 if (new_memory == (void *)-1) {
                     return NULL;
                 }
-                struct block_meta *new_block = (struct block_meta *)new_memory;
+                struct block_meta *new_block = (block_meta *)new_memory;
                 new_block->size = new_size;
                 new_block->status = STATUS_ALLOC;
                 new_block->next = aux->next;
@@ -215,36 +201,31 @@ void *os_realloc(void *ptr, size_t size) {
                     prev->next = new_block;
                 }
 
-                memcpy((char *)new_memory + sizeof(struct block_meta), ptr, new_size);
-                munmap(aux, aux->size + sizeof(struct block_meta));
-                return (char *)new_memory + sizeof(struct block_meta);
+                memcpy((char *)new_memory + block_meta_size, ptr, new_size);
+                munmap(aux, aux->size + block_meta_size);
+                return (char *)new_memory + block_meta_size;
             } 
 		}
 		else
-			if (aux->size - (size + (8 - size % 8) % 8) >= sizeof(struct block_meta) + 1) {
-				struct block_meta *new_node = (char *)aux + sizeof(struct block_meta) + (size + (8 - size % 8) % 8);
-				new_node->size = aux->size - (size + (8 - size % 8) % 8) - sizeof(struct block_meta);
+			if (aux->size - added_padding(size) >= block_meta_size + 1) {
+				block_meta *new_node = (char *)aux + get_full_data_block_size(size);
+				new_node->size = aux->size - get_full_data_block_size(size);
 				new_node->status = STATUS_FREE;
-				aux->size = size + (8 - size % 8) % 8;
+				aux->size = added_padding(size);
 				new_node->next = aux->next;
 				aux->next = new_node;
 			}
-
-        return ptr;
-    } else if (aux->next && aux->next->status == STATUS_FREE && aux->size + sizeof(struct block_meta) + aux->next->size >= size + (8 - size % 8) % 8) {
-        // If the next block is free and large enough, extend the current block
-        aux->size = aux->size + sizeof(struct block_meta) + aux->next->size;
+        	return ptr;
+    } else if (aux->next && aux->next->status == STATUS_FREE && aux->size + block_meta_size + aux->next->size >= added_padding(size)) {
+        aux->size = aux->size + block_meta_size + aux->next->size;
         aux->next = aux->next->next;
-
         return ptr;
     } else {
-        // Allocate a new block and copy the data
         void *new_ptr = allocate_memory_by_target(size, MMAP_THRESHOLD);
         if (new_ptr) {
             memcpy(new_ptr, ptr, aux->size);
             os_free(ptr);
         }
-
         return new_ptr;
     }
 }
