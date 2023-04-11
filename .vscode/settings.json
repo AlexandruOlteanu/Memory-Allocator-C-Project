@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "helpers.h": "c",
+        "osmem.h": "c",
+        "test-utils.h": "c",
+        "stdlib.h": "c"
+    }
+}
