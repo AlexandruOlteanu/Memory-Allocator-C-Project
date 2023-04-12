@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: BSD-3-Clause
-
 #include "osmem.h"
 #include "helpers.h"
 #include <stdlib.h>
@@ -45,14 +43,12 @@ int get_full_data_block_size(int value) {
 	return added_padding(value + block_meta_size);
 }
 
-void *allocate_memory_by_target(size_t size, int target) {
+void *allocate_memory_sbrk(size_t size) {
 	if (!size) {
-    	return NULL;
+		return NULL;
 	}
 
-    if (get_full_data_block_size(size) < target) {
-
-		if (data.head == NULL) {
+	if (data.head == NULL) {
         	void *memory = sbrk(MMAP_THRESHOLD);
 			block_meta *node = memory;
 			node->size = added_padding(size);
@@ -98,27 +94,38 @@ void *allocate_memory_by_target(size_t size, int target) {
 				}
 			}
 		}
-        
-    } else {
-		block_meta *node;
-        void *memory = mmap(NULL, get_full_data_block_size(size), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-		node = memory;
-		node->size = added_padding(size);
-		node->status = STATUS_MAPPED;
-		node->next = NULL;
-		if (data.head == NULL) {
-			data.head = node;
-		}
-		else {
-			block_meta *last = get_last_block();
-			last->next = node;
-		}
-        return (void *)((char *)memory + sizeof(struct block_meta));
-    }
+}
+
+void *allocate_memory_mmap(size_t size) {
+	if (!size) {
+		return NULL;
+	}
+
+	block_meta *node;
+	void *memory = mmap(NULL, get_full_data_block_size(size), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	node = memory;
+	node->size = added_padding(size);
+	node->status = STATUS_MAPPED;
+	node->next = NULL;
+	if (data.head == NULL) {
+		data.head = node;
+	}
+	else {
+		block_meta *last = get_last_block();
+		last->next = node;
+	}
+	return (void *)((char *)memory + sizeof(struct block_meta));
 }
 
 void *os_malloc(size_t size) {
-   return allocate_memory_by_target(size, MMAP_THRESHOLD);
+	void *result = NULL;
+	if (get_full_data_block_size(size) < MMAP_THRESHOLD) {
+		result = allocate_memory_sbrk(size);
+	}
+	else {
+		result = allocate_memory_mmap(size);
+	}
+   return result;
 }
 
 void os_free(void *ptr) {
@@ -159,23 +166,34 @@ void os_free(void *ptr) {
 
 void *os_calloc(size_t nmemb, size_t size)
 {
-	size = nmemb * size;
-	void *ptr = allocate_memory_by_target(size, getpagesize());
-  	memset(ptr, 0, size);
-  	return ptr;
+	size_t total_size = nmemb * size;
+	void *result = NULL;
+	if (get_full_data_block_size(total_size) < getpagesize()) {
+		result = allocate_memory_sbrk(total_size);
+	}
+	else {
+		result = allocate_memory_mmap(total_size);
+	}
+  	memset(result, 0, total_size);
+  	return result;
 }
 
 void *os_realloc(void *ptr, size_t size) {
     if (ptr == NULL) {
-        return allocate_memory_by_target(size, MMAP_THRESHOLD);
+		if (get_full_data_block_size(size) < MMAP_THRESHOLD) {
+        	return allocate_memory_sbrk(size);
+		}
+		else {
+			return allocate_memory_mmap(size);
+		}
     }
 
-    if (size == 0) {
+    if (!size) {
         os_free(ptr);
         return NULL;
     }
 
-    struct block_meta *aux = (struct block_meta *)ptr - 1;
+    block_meta *aux = (block_meta *)ptr - 1;
 
     if (added_padding(size) <= aux->size) {
 
@@ -221,11 +239,18 @@ void *os_realloc(void *ptr, size_t size) {
         aux->next = aux->next->next;
         return ptr;
     } else {
-        void *new_ptr = allocate_memory_by_target(size, MMAP_THRESHOLD);
-        if (new_ptr) {
-            memcpy(new_ptr, ptr, aux->size);
+        void *result = NULL;
+		if (get_full_data_block_size(size) < MMAP_THRESHOLD) {
+			result = allocate_memory_sbrk(size);
+		}
+		else {
+			result = allocate_memory_mmap(size);
+		}
+
+        if (result) {
+            memcpy(result, ptr, aux->size);
             os_free(ptr);
         }
-        return new_ptr;
+        return result;
     }
 }
