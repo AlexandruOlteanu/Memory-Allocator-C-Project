@@ -23,11 +23,12 @@ block_meta *get_first_free_data_block(size_t size)
 {
 	block_meta *current = data.head;
 	block_meta *result = NULL;
+
 	while (current != NULL) {
 		if (current->size >= size && current->status == STATUS_FREE) {
 			result = current;
 			break;
-		} 
+		}
 		current = current->next;
 	}
 
@@ -44,27 +45,28 @@ void find_ptr_and_prev(block_meta **current, void *ptr, block_meta **prev)
 }
 
 
-int added_padding(int value) 
+int added_padding(int value)
 {
 	return (value / BYTE_GROUP_MEASURE) * BYTE_GROUP_MEASURE + (value % BYTE_GROUP_MEASURE != 0) * BYTE_GROUP_MEASURE;
 }
 
-int get_full_data_block_size(int value) 
+int get_full_data_block_size(int value)
 {
 	return added_padding(value + block_meta_size);
 }
 
-block_meta *find_first_allocated(void) 
+block_meta *find_first_allocated(void)
 {
 	block_meta *current = data.head;
 	block_meta *result = NULL;
+
 	while (current != NULL) {
 		if (current->status == STATUS_ALLOC || current->status == STATUS_FREE) {
 			result = current;
 			break;
 		}
 		current = current->next;
-	} 
+	}
 	return result;
 }
 
@@ -77,22 +79,20 @@ void *allocate_memory_sbrk(size_t size)
 
 	if (first_allocated == NULL) {
 		void *full_data = sbrk(MMAP_THRESHOLD);
-
 		block_meta *current = full_data;
+
 		current->size = added_padding(size);
 		current->status = STATUS_ALLOC;
 		current->next = NULL;
 		if (data.head == NULL) {
 			data.head = current;
-		}
-		else {
+		} else {
 			current->next = data.head->next;
 			data.head->next = current;
 		}
 		void *data_memory = (const char *)full_data + block_meta_size;
 		return data_memory;
-	}
-	else {
+	} else {
 		block_meta *answer = get_first_free_data_block(added_padding(size));
 
 		if (answer != NULL) {
@@ -100,95 +100,89 @@ void *allocate_memory_sbrk(size_t size)
 
 			if (answer->size - added_padding(size) >= block_meta_size + 1) {
 				block_meta *current = (block_meta *)((const char *)answer + get_full_data_block_size(size));
-				
+
 				current->status = STATUS_FREE;
 				current->next = answer->next;
 				answer->next = current;
 				current->size = answer->size - get_full_data_block_size(size);
 				answer->size = added_padding(size);
 			}
-			void *data_memory = (char *)answer + block_meta_size; 
+			void *data_memory = (char *)answer + block_meta_size;
+
+			return data_memory;
+		}
+		block_meta *last = get_last_block();
+
+		if (last->status == STATUS_FREE) {
+			sbrk(added_padding(size - last->size));
+			last->status = STATUS_ALLOC;
+			last->size += added_padding(size - last->size);
+			void *data_memory = (char *)last + block_meta_size;
 			
 			return data_memory;
-		} else {
-			block_meta *last = get_last_block();
-
-			if (last->status == STATUS_FREE) {
-				sbrk(added_padding(size - last->size));
-				last->status = STATUS_ALLOC;
-				last->size += added_padding(size - last->size);
-				void *data_memory = (char *)last + block_meta_size;
-				
-				return data_memory;
-			}
-			else {
-				void *full_data = sbrk(get_full_data_block_size(size));
-				block_meta *current = full_data;
-				current->status = STATUS_ALLOC;
-				current->size = added_padding(size);
-				current->next = NULL;
-				block_meta *last = get_last_block();
-				last -> next = current;
-				last = current;
-				void *data_memory = (char *)full_data + block_meta_size;
-				return data_memory;
-			}
 		}
+		void *full_data = sbrk(get_full_data_block_size(size));
+		block_meta *current = full_data;
+
+		current->status = STATUS_ALLOC;
+		current->size = added_padding(size);
+		current->next = NULL;
+		last->next = current;
+		last = current;
+		void *data_memory = (char *)full_data + block_meta_size;
+
+		return data_memory;
 	}
 }
 
-void *allocate_memory_mmap(size_t size) 
+void *allocate_memory_mmap(size_t size)
 {
 	if (!size)
 		return NULL;
 
 	block_meta *current = NULL;
-	void *full_data = mmap(NULL, get_full_data_block_size(size), PROT_WRITE| PROT_READ, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+	void *full_data = mmap(NULL, get_full_data_block_size(size), PROT_WRITE | PROT_READ, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+
 	current = full_data;
 	current->status = STATUS_MAPPED;
 	current->size = added_padding(size);
 	current->next = NULL;
 	if (data.head == NULL) {
 		data.head = current;
-	}
-	else {
+	} else {
 		block_meta *last = get_last_block();
 		last->next = current;
 	}
 	void *data_memory = (char *)full_data + block_meta_size;
+
 	return data_memory;
 }
 
-void *os_malloc(size_t size) {
+void *os_malloc(size_t size)
+{
 	void *result = NULL;
-	if (get_full_data_block_size(size) < MMAP_THRESHOLD) {
+	if (get_full_data_block_size(size) < MMAP_THRESHOLD)
 		result = allocate_memory_sbrk(size);
-	}
-	else {
+	else
 		result = allocate_memory_mmap(size);
-	}
-   return result;
+	return result;
 }
 
-void os_free(void *ptr) {
-    if (ptr != NULL) {
-
+void os_free(void *ptr)
+{
+	if (ptr != NULL) {
 		block_meta *current = NULL, *prev = NULL;
 
 		find_ptr_and_prev(&current, ptr, &prev);
-
 		if (current->status == STATUS_MAPPED) {
-			if (current == data.head) {
+			if (current == data.head)
 				data.head = data.head->next;
-			}
-			else {
+			else
 				prev->next = current->next;
-			}
-
 			size_t size = current->size;
+
 			munmap(current, size + block_meta_size);
-		}
-		else {
+		} else {
 			current->status = STATUS_FREE;
 			if (prev != NULL && prev->status == STATUS_FREE) {
 				prev->size += current->size + block_meta_size;
@@ -217,14 +211,13 @@ void *os_calloc(size_t nmemb, size_t size)
   	return result;
 }
 
-void *os_realloc(void *ptr, size_t size) {
+void *os_realloc(void *ptr, size_t size)
+{
     if (ptr == NULL) {
-		if (get_full_data_block_size(size) < MMAP_THRESHOLD) {
+		if (get_full_data_block_size(size) < MMAP_THRESHOLD)
         	return allocate_memory_sbrk(size);
-		}
-		else {
+		else
 			return allocate_memory_mmap(size);
-		}
     }
 
     if (!size) {
