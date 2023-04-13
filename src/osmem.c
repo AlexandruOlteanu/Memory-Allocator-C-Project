@@ -271,17 +271,16 @@ void *os_realloc(void *ptr, size_t size)
 		aux->size = aux->size + block_meta_size + aux->next->size;
 		aux->next = aux->next->next;
 		return ptr;
-	} else {
-		void *result = NULL;
-
-		if (get_full_data_block_size(size) < MMAP_THRESHOLD)
-			result = allocate_memory_sbrk(size);
-		else
-			result = allocate_memory_mmap(size);
-		if (result) {
-			memcpy(result, ptr, aux->size);
-			os_free(ptr);
-		}
-		return result;
 	}
+	void *result = NULL;
+
+	if (get_full_data_block_size(size) < MMAP_THRESHOLD)
+		result = allocate_memory_sbrk(size);
+	else
+		result = allocate_memory_mmap(size);
+	if (result) {
+		memcpy(result, ptr, aux->size);
+		os_free(ptr);
+	}
+	return result;
 }
