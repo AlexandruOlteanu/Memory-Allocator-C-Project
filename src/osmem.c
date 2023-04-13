@@ -233,10 +233,11 @@ void *os_realloc(void *ptr, size_t size)
 			if (added_padding(size) < MMAP_THRESHOLD) {
 				size_t new_size = added_padding(size);
 				void *new_memory = sbrk(MMAP_THRESHOLD);
+
 				if (new_memory == (void *)-1)
 					return NULL;
-                block_meta *new_block = (block_meta *)new_memory;
-                
+				block_meta *new_block = (block_meta *)new_memory;
+
 				new_block->size = new_size;
 				new_block->status = STATUS_ALLOC;
 				new_block->next = aux->next;
@@ -245,9 +246,9 @@ void *os_realloc(void *ptr, size_t size)
 					data.head = new_block;
 				} else {
 					block_meta *prev = data.head;
-					while (prev->next != aux) {
+
+					while (prev->next != aux)
 						prev = prev->next;
-					}
 					prev->next = new_block;
 				}
 
@@ -258,27 +259,25 @@ void *os_realloc(void *ptr, size_t size)
 		} else
 			if (aux->size - added_padding(size) >= block_meta_size + 1) {
 				block_meta *new_node = (char *)aux + get_full_data_block_size(size);
-				
+
 				new_node->size = aux->size - get_full_data_block_size(size);
 				new_node->status = STATUS_FREE;
 				aux->size = added_padding(size);
 				new_node->next = aux->next;
 				aux->next = new_node;
 			}
-			return ptr;
+		return ptr;
 	} else if (aux->next && aux->next->status == STATUS_FREE && aux->size + block_meta_size + aux->next->size >= added_padding(size)) {
 		aux->size = aux->size + block_meta_size + aux->next->size;
 		aux->next = aux->next->next;
-		 return ptr;
+		return ptr;
 	} else {
 		void *result = NULL;
-		if (get_full_data_block_size(size) < MMAP_THRESHOLD) {
-			result = allocate_memory_sbrk(size);
-		}
-		else {
-			result = allocate_memory_mmap(size);
-		}
 
+		if (get_full_data_block_size(size) < MMAP_THRESHOLD)
+			result = allocate_memory_sbrk(size);
+		else
+			result = allocate_memory_mmap(size);
 		if (result) {
 			memcpy(result, ptr, aux->size);
 			os_free(ptr);
