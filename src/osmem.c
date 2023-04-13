@@ -133,7 +133,7 @@ void *allocate_memory_mmap(size_t size) {
 	}
 
 	block_meta *current = NULL;
-	void *full_data = mmap(NULL, get_full_data_block_size(size), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	void *full_data = mmap(NULL, get_full_data_block_size(size), PROT_WRITE| PROT_READ, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 	current = full_data;
 	current->status = STATUS_MAPPED;
 	current->size = added_padding(size);
