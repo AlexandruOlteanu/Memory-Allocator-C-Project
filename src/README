@@ -1,0 +1,11 @@
+<Copyright Alexandru Olteanu, grupa 332CA, alexandruolteanu2001@gmail.com>
+
+    Tema a fost interesanta, mai mult o tema de structuri de date si PC insa 
+nice to know diferitele tehnici prin care se aloca eficient memoria.
+Pentru rezolvare am folosit in mare parte sursele puse in cerinta, modificate
+si adaptate pentru cazul temei de fata. A fost putin dificil de inteles cerinta 
+la inceput insa per total a fost ok.
+    Pentru implementare am folosit structuri deja cunoscute: lucru cu liste inlantuite, 
+formula pentru padding adaugat corect, pointeri si diverse tehnici uzuale de programare.
+De asemenea, am lucrat destul de mult cu gdb in aceasta tema, deci pot spune ca imbunatatirea
+skill-urilor in aceasta directie este un mare plus. 
